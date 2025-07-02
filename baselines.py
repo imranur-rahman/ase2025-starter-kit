@@ -2,6 +2,12 @@ import os
 import jsonlines
 import random
 import argparse
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
+from langchain.schema import Document
+from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
 from rank_bm25 import BM25Okapi
 
@@ -114,6 +120,147 @@ def find_bm25_file(root_dir: str, prefix: str, suffix: str, min_lines: int = 10)
     return file_names[best_idx] if file_names else None
 
 
+def hybrid_search_file(root_dir: str, prefix: str, suffix: str, min_lines: int = 10) -> str:
+    """
+    Select the file:
+        - in the given language
+        - with the highest hybrid score (BM25 + embeddings) with the completion file
+        - in the given directory and its subdirectories
+        - meeting length requirements
+
+    :param root_dir: Directory to search for files.
+    :param prefix: Prefix of the completion file.
+    :param suffix: Suffix of the completion file.
+    :param min_lines: Minimum number of lines required in the file.
+    :return: Selected file path or None if no files were found.
+    """
+
+    file_contents = []
+    file_names = []
+
+    # Traverse files and collect content
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        for filename in filenames:
+            if filename.endswith(extension):
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if len(lines) >= min_lines:
+                            content = "\n".join(lines)
+                            file_contents.append(content)
+                            file_names.append(file_path)
+                except Exception as e:
+                    # Optional: handle unreadable files
+                    # print(f"Could not read {file_path}: {e}")
+                    pass
+
+    if not file_contents:
+        return None
+
+    # Create hybrid retriever
+    documents = [Document(page_content=content) for content in file_contents]
+    
+    # BM25 retriever
+    bm25_retriever = BM25Retriever.from_documents(documents)
+    bm25_retriever.k = 1  # We want top 1 result
+    
+    # Vector retriever with OpenAI embeddings
+    embeddings = OpenAIEmbeddings()
+    vector_store = FAISS.from_documents(documents, embeddings)
+    vector_retriever = vector_store.as_retriever(search_kwargs={"k": 1})
+    
+    # Ensemble retriever combining both
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.4, 0.6]  # BM25 weight: 0.4, Vector weight: 0.6
+    )
+    
+    # Query with prefix and suffix
+    query = prefix + " " + suffix
+    results = ensemble_retriever.get_relevant_documents(query)
+    
+    if results:
+        # Find the index of the best result in our original list
+        best_content = results[0].page_content
+        best_idx = file_contents.index(best_content)
+        return file_names[best_idx]
+    
+    return None
+
+
+def hybrid_search_file_local(root_dir: str, prefix: str, suffix: str, min_lines: int = 10) -> str:
+    """
+    Select the file:
+        - in the given language
+        - with the highest hybrid score (BM25 + local embeddings) with the completion file
+        - in the given directory and its subdirectories
+        - meeting length requirements
+
+    :param root_dir: Directory to search for files.
+    :param prefix: Prefix of the completion file.
+    :param suffix: Suffix of the completion file.
+    :param min_lines: Minimum number of lines required in the file.
+    :return: Selected file path or None if no files were found.
+    """
+
+    file_contents = []
+    file_names = []
+
+    # Traverse files and collect content
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        for filename in filenames:
+            if filename.endswith(extension):
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if len(lines) >= min_lines:
+                            content = "\n".join(lines)
+                            file_contents.append(content)
+                            file_names.append(file_path)
+                except Exception as e:
+                    # Optional: handle unreadable files
+                    # print(f"Could not read {file_path}: {e}")
+                    pass
+
+    if not file_contents:
+        return None
+
+    # Create hybrid retriever
+    documents = [Document(page_content=content) for content in file_contents]
+    
+    # BM25 retriever
+    bm25_retriever = BM25Retriever.from_documents(documents)
+    bm25_retriever.k = 1  # We want top 1 result
+    
+    # Vector retriever with local HuggingFace embeddings
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        # model_kwargs={'device': 'cpu'}
+    )
+    vector_store = FAISS.from_documents(documents, embeddings)
+    vector_retriever = vector_store.as_retriever(search_kwargs={"k": 1})
+    
+    # Ensemble retriever combining both
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, vector_retriever],
+        weights=[0.4, 0.6]  # BM25 weight: 0.4, Vector weight: 0.6
+    )
+    
+    # Query with prefix and suffix
+    query = prefix + " " + suffix
+    results = ensemble_retriever.get_relevant_documents(query)
+    
+    if results:
+        # Find the index of the best result in our original list
+        best_content = results[0].page_content
+        best_idx = file_contents.index(best_content)
+        return file_names[best_idx]
+    
+    return None
+
+
 def find_random_recent_file(root_dir: str, recent_filenames: list[str], min_lines: int = 10) -> str:
     """
     Select the most recent file:
@@ -184,6 +331,8 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                 # If no recent files match our filtering criteria, select a random file instead
                 if file_name is None:
                     file_name = find_random_file(root_directory)
+            elif strategy == "hybrid":
+                file_name = hybrid_search_file_local(root_directory, datapoint['prefix'], datapoint['suffix'])
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
 
