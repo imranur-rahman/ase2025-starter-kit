@@ -178,7 +178,7 @@ def hybrid_search_file(root_dir: str, prefix: str, suffix: str, min_lines: int =
     
     # Query with prefix and suffix
     query = prefix + " " + suffix
-    results = ensemble_retriever.get_relevant_documents(query)
+    results = ensemble_retriever.invoke(query)
     
     if results:
         # Find the index of the best result in our original list
@@ -236,7 +236,7 @@ def hybrid_search_file_local(root_dir: str, prefix: str, suffix: str, min_lines:
     
     # Vector retriever with local HuggingFace embeddings
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_name="sentence-transformers/all-mpnet-base-v2",
         # model_kwargs={'device': 'cpu'}
     )
     vector_store = FAISS.from_documents(documents, embeddings)
@@ -250,7 +250,7 @@ def hybrid_search_file_local(root_dir: str, prefix: str, suffix: str, min_lines:
     
     # Query with prefix and suffix
     query = prefix + " " + suffix
-    results = ensemble_retriever.get_relevant_documents(query)
+    results = ensemble_retriever.invoke(query)
     
     if results:
         # Find the index of the best result in our original list
@@ -301,6 +301,94 @@ def trim_suffix(suffix: str):
         suffix = "\n".join(suffix_lines[:10])
     return suffix
 
+def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_lines: int = 10):
+    """
+    Chunk the code into 10 lines each with 5 lines overlap, store embeddings in a vector database,
+    and compute BM25 scores for later retrieval.
+
+    :param root_dir: Directory to search for code files.
+    :param vector_db_path: Path to store the vector database.
+    :param min_lines: Minimum number of lines required in the file.
+    """
+
+    code_chunks = []
+    chunk_metadata = []
+
+    # Traverse files and chunk code
+    for dirpath, dirnames, filenames in os.walk(root_dir):
+        for filename in filenames:
+            if filename.endswith(extension):
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        if len(lines) >= min_lines:
+                            # Chunk the code into 10 lines each with 5 lines overlap
+                            for i in range(0, len(lines), 5):
+                                chunk = lines[i:i + 10]
+                                if len(chunk) < 10:
+                                    break
+                                code_chunks.append("\n".join(chunk))
+                                chunk_metadata.append({"file_name": filename, "file_path": file_path, "start_line": i + 1, "end_line": i + 10})
+                except Exception as e:
+                    # Optional: handle unreadable files
+                    # print(f"Could not read {file_path}: {e}")
+                    pass
+
+    # Compute embeddings and store in vector database
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+    documents = [Document(page_content=chunk, metadata=meta) for chunk, meta in zip(code_chunks, chunk_metadata)]
+    vector_store = FAISS.from_documents(documents, embeddings)
+    vector_store.save_local(vector_db_path)
+
+    # Compute BM25 scores
+    bm25_corpus = [chunk for chunk in code_chunks]
+    bm25 = BM25Okapi([chunk.split() for chunk in bm25_corpus])
+
+    return vector_store, bm25, code_chunks, chunk_metadata
+
+
+def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: BM25Okapi, code_chunks: list, chunk_metadata: list, top_k: int = 5):
+    """
+    Retrieve top-k code chunks using ensemble of embeddings and BM25 scores.
+
+    :param prefix: Prefix of the code.
+    :param suffix: Suffix of the code.
+    :param vector_store: Vector database storing code embeddings.
+    :param bm25: BM25 retriever for code chunks.
+    :param code_chunks: List of code chunks.
+    :param chunk_metadata: Metadata for code chunks.
+    :param top_k: Number of top chunks to retrieve.
+    :return: List of top-k code chunks with metadata.
+    """
+
+    # Ensemble retriever
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[
+            vector_store.as_retriever(search_kwargs={"k": top_k}),
+            BM25Retriever.from_documents([Document(page_content=chunk) for chunk in code_chunks])
+        ],
+        weights=[0.5, 0.5]  # Equal weights for embeddings and BM25
+    )
+
+    # Get top-k results
+    query = prefix + " " + suffix
+    top_k_results = ensemble_retriever.invoke(query)
+    print(f"Vector store size: {vector_store.index.ntotal}")
+    print(f"Code chunks size: {len(code_chunks)}")
+    print(f"Top-k results from ensemble retriever: {len(top_k_results)}")
+
+    # Add metadata to the results
+    enriched_results = []
+    for result in top_k_results:
+        for meta in chunk_metadata:
+            if result.page_content == meta['file_path']:
+                enriched_results.append(Document(page_content=result.page_content, metadata=meta))
+                break
+    print (f"Top-k chunks retrieved: {len(enriched_results)}")
+    return enriched_results
+
+
 # Path to the file with completion points
 completion_points_file = os.path.join("data", f"{language}-{stage}.jsonl")
 
@@ -333,6 +421,32 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                     file_name = find_random_file(root_directory)
             elif strategy == "hybrid":
                 file_name = hybrid_search_file_local(root_directory, datapoint['prefix'], datapoint['suffix'])
+            elif strategy == "code-chunk":
+                vector_db_path = os.path.join("data", "vector_db")
+                vector_store, bm25, code_chunks, chunk_metadata = chunk_code_and_store_embeddings(root_directory, vector_db_path)
+                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, code_chunks, chunk_metadata, top_k=5)
+
+                context_parts = []
+                for chunk in top_k_chunks:
+                    try:
+                        file_path = chunk.metadata['file_path']
+                        file_name = chunk.metadata['file_name']
+                        file_content = chunk.page_content
+                        context_part = FILE_COMPOSE_FORMAT.format(
+                            file_sep=FILE_SEP_SYMBOL,
+                            file_name=file_name,
+                            file_content=file_content
+                        )
+                        context_parts.append(context_part)
+                    except Exception as e:
+                        print(f"Skipping chunk due to error: {e}")
+                        continue
+
+                context = "\n".join(context_parts)
+                submission = {"context": context}
+                print(f"Top-k chunks retrieved: {len(top_k_chunks)}")
+                writer.write(submission)
+                continue
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
 
