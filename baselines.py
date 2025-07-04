@@ -374,18 +374,28 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
             vector_store.as_retriever(search_kwargs={"k": top_k}),
             bm25_retriever
         ],
-        weights=[0.5, 0.5]  # Equal weights for embeddings and BM25
+        weights=[0.4, 0.6]  # Adjusted weights for embeddings and BM25
     )
 
     # Get top-k results
     query = prefix + " " + suffix
     top_k_results = ensemble_retriever.invoke(query)
+
+    # Ensure no duplicates in the results
+    unique_results = []
+    seen_contents = set()
+    for result in top_k_results:
+        if result.page_content not in seen_contents:
+            unique_results.append(result)
+            seen_contents.add(result.page_content)
+
     print(f"Vector store size: {vector_store.index.ntotal}")
     print(f"Code chunks size: {len(code_chunks)}")
     print(f"Top-k results from ensemble retriever: {len(top_k_results)}")
+    print(f"Unique results after filtering: {len(unique_results)}")
 
     print ("--------- Retrieving top-k code chunks -----------")
-    return top_k_results
+    return unique_results
 
 
 # Path to the file with completion points
@@ -423,7 +433,7 @@ with jsonlines.open(completion_points_file, 'r') as reader:
             elif strategy == "code-chunk":
                 vector_db_path = os.path.join("data", "vector_db")
                 vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents = chunk_code_and_store_embeddings(root_directory, vector_db_path)
-                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents, top_k=5)
+                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents, top_k=30)
 
                 context_parts = []
                 for chunk in top_k_chunks:
