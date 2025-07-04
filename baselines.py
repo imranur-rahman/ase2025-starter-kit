@@ -342,13 +342,18 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
     vector_store.save_local(vector_db_path)
 
     # Compute BM25 scores
-    bm25_corpus = [chunk for chunk in code_chunks]
-    bm25 = BM25Okapi([chunk.split() for chunk in bm25_corpus])
+    # Create BM25 retriever from documents
+    bm25_retriever = BM25Retriever.from_documents(documents)
+    # bm25_retriever.k = 10  # Set default k for retrieval
+    
+    # Also create BM25Okapi for direct scoring if needed
+    bm25_corpus = [doc.page_content.split() for doc in documents]
+    bm25 = BM25Okapi(bm25_corpus)
 
-    return vector_store, bm25, code_chunks, chunk_metadata
+    return vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents
 
 
-def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: BM25Okapi, code_chunks: list, chunk_metadata: list, top_k: int = 5):
+def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: BM25Okapi, bm25_retriever: BM25Retriever, code_chunks: list, chunk_metadata: list, documents: Document, top_k: int = 5):
     """
     Retrieve top-k code chunks using ensemble of embeddings and BM25 scores.
 
@@ -361,12 +366,13 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
     :param top_k: Number of top chunks to retrieve.
     :return: List of top-k code chunks with metadata.
     """
-
+    print ("--------- Retrieving top-k code chunks -----------")
+    bm25_retriever.k = top_k
     # Ensemble retriever
     ensemble_retriever = EnsembleRetriever(
         retrievers=[
             vector_store.as_retriever(search_kwargs={"k": top_k}),
-            BM25Retriever.from_documents([Document(page_content=chunk) for chunk in code_chunks])
+            bm25_retriever
         ],
         weights=[0.5, 0.5]  # Equal weights for embeddings and BM25
     )
@@ -378,15 +384,8 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
     print(f"Code chunks size: {len(code_chunks)}")
     print(f"Top-k results from ensemble retriever: {len(top_k_results)}")
 
-    # Add metadata to the results
-    enriched_results = []
-    for result in top_k_results:
-        for meta in chunk_metadata:
-            if result.page_content == meta['file_path']:
-                enriched_results.append(Document(page_content=result.page_content, metadata=meta))
-                break
-    print (f"Top-k chunks retrieved: {len(enriched_results)}")
-    return enriched_results
+    print ("--------- Retrieving top-k code chunks -----------")
+    return top_k_results
 
 
 # Path to the file with completion points
@@ -423,19 +422,16 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                 file_name = hybrid_search_file_local(root_directory, datapoint['prefix'], datapoint['suffix'])
             elif strategy == "code-chunk":
                 vector_db_path = os.path.join("data", "vector_db")
-                vector_store, bm25, code_chunks, chunk_metadata = chunk_code_and_store_embeddings(root_directory, vector_db_path)
-                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, code_chunks, chunk_metadata, top_k=5)
+                vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents = chunk_code_and_store_embeddings(root_directory, vector_db_path)
+                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents, top_k=5)
 
                 context_parts = []
                 for chunk in top_k_chunks:
                     try:
-                        file_path = chunk.metadata['file_path']
-                        file_name = chunk.metadata['file_name']
-                        file_content = chunk.page_content
                         context_part = FILE_COMPOSE_FORMAT.format(
                             file_sep=FILE_SEP_SYMBOL,
-                            file_name=file_name,
-                            file_content=file_content
+                            file_name=chunk.metadata['file_name'],
+                            file_content=chunk.page_content
                         )
                         context_parts.append(context_part)
                     except Exception as e:
@@ -444,7 +440,7 @@ with jsonlines.open(completion_points_file, 'r') as reader:
 
                 context = "\n".join(context_parts)
                 submission = {"context": context}
-                print(f"Top-k chunks retrieved: {len(top_k_chunks)}")
+                print(f"Top-k chunks retrieved and merged: {len(top_k_chunks)}")
                 writer.write(submission)
                 continue
             else:
