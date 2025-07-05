@@ -2,6 +2,8 @@ import os
 import jsonlines
 import random
 import argparse
+import torch
+from tqdm import tqdm
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
 from langchain.schema import Document
@@ -301,7 +303,7 @@ def trim_suffix(suffix: str):
         suffix = "\n".join(suffix_lines[:10])
     return suffix
 
-def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_lines: int = 10):
+def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_lines: int = 8):
     """
     Chunk the code into 10 lines each with 5 lines overlap, store embeddings in a vector database,
     and compute BM25 scores for later retrieval.
@@ -315,6 +317,8 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
     chunk_metadata = []
 
     # Traverse files and chunk code
+    CHUNK_SIZE = 8  # Number of lines in each chunk
+    OVERLAP_SIZE = 1  # Number of overlapping lines
     for dirpath, dirnames, filenames in os.walk(root_dir):
         for filename in filenames:
             if filename.endswith(extension):
@@ -323,28 +327,36 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
                     with open(file_path, 'r', encoding='utf-8') as f:
                         lines = f.readlines()
                         if len(lines) >= min_lines:
-                            # Chunk the code into 10 lines each with 5 lines overlap
-                            for i in range(0, len(lines), 5):
-                                chunk = lines[i:i + 10]
-                                if len(chunk) < 10:
+                            # Chunk the code into CHUNK_SIZE lines each with OVERLAP_SIZE lines overlap
+                            for i in range(0, len(lines), OVERLAP_SIZE):
+                                chunk = lines[i:i + CHUNK_SIZE]
+                                if len(chunk) < CHUNK_SIZE:
                                     break
                                 code_chunks.append("\n".join(chunk))
-                                chunk_metadata.append({"file_name": filename, "file_path": file_path, "start_line": i + 1, "end_line": i + 10})
+                                chunk_metadata.append({"file_name": filename, "file_path": file_path, "start_line": i + 1, "end_line": i + CHUNK_SIZE})
                 except Exception as e:
                     # Optional: handle unreadable files
                     # print(f"Could not read {file_path}: {e}")
                     pass
 
     # Compute embeddings and store in vector database
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-mpnet-base-v2")
+    embeddings = HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-mpnet-base-v2",
+        model_kwargs={'device': 'cpu'}
+    )
+    # Encode embeddings in parallel
     documents = [Document(page_content=chunk, metadata=meta) for chunk, meta in zip(code_chunks, chunk_metadata)]
+    for doc in tqdm(documents, desc="Encoding code chunks"):
+        pass # just to show progress if debugging
     vector_store = FAISS.from_documents(documents, embeddings)
+    # Clear GPU memory
+    torch.mps.empty_cache()
+    # Save the vector store to the specified path
     vector_store.save_local(vector_db_path)
 
     # Compute BM25 scores
     # Create BM25 retriever from documents
     bm25_retriever = BM25Retriever.from_documents(documents)
-    # bm25_retriever.k = 10  # Set default k for retrieval
     
     # Also create BM25Okapi for direct scoring if needed
     bm25_corpus = [doc.page_content.split() for doc in documents]
@@ -411,7 +423,12 @@ predictions_file = os.path.join("predictions", f"{prediction_file_name}.jsonl")
 
 with jsonlines.open(completion_points_file, 'r') as reader:
     with jsonlines.open(predictions_file, 'w') as writer:
+        processed_count = 0  # Initialize counter
+
         for datapoint in reader:
+            processed_count += 1  # Increment counter
+            print(f"Processing datapoint {processed_count}...")
+
             # Identify the repository storage for the datapoint
             repo_path = datapoint['repo'].replace("/", "__")
             repo_revision = datapoint['revision']
