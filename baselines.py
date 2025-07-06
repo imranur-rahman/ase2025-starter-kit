@@ -341,8 +341,10 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
 
     # Compute embeddings and store in vector database
     embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-mpnet-base-v2",
-        model_kwargs={'device': 'cpu'}
+        # model_name="bigcode/starcoder",
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={'token': os.environ.get('HUGGINGFACE_TOKEN')},
+        # model_kwargs={'device': 'cpu'}
     )
     # Encode embeddings in parallel
     documents = [Document(page_content=chunk, metadata=meta) for chunk, meta in zip(code_chunks, chunk_metadata)]

@@ -1770,6 +1770,49 @@ realtime = ["websockets (>=13,<16)"]
 voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
 
 [[package]]
+name = "optimum"
+version = "1.26.1"
+description = "Optimum Library is an extension of the Hugging Face Transformers library, providing a framework to integrate third-party libraries from Hardware Partners and interface with their specific functionality."
+optional = false
+python-versions = ">=3.9.0"
+groups = ["main"]
+files = [
+    {file = "optimum-1.26.1-py3-none-any.whl", hash = "sha256:dd8e1b9083e3098f9b1452c0e266aeef61ef6fa460175e2553da5749a1c7774b"},
+    {file = "optimum-1.26.1.tar.gz", hash = "sha256:bc42f5f2394a395862d015af583120f5a076fd33ee3390d1f4e9db1ce47de5b8"},
+]
+
+[package.dependencies]
+huggingface-hub = ">=0.8.0"
+numpy = "*"
+packaging = "*"
+torch = ">=1.11"
+transformers = ">=4.29"
+
+[package.extras]
+amd = ["optimum-amd"]
+benchmark = ["evaluate (>=0.2.0)", "optuna", "scikit-learn", "seqeval", "torchvision", "tqdm"]
+dev = ["Pillow", "accelerate", "black (>=23.1,<24.0)", "einops", "hf-xet", "onnxslim (>=0.1.53)", "parameterized", "pytest (<=8.0.0)", "pytest-xdist", "requests", "rjieba", "ruff (==0.1.5)", "sacremoses", "scikit-learn", "sentencepiece", "timm", "torchaudio", "torchvision"]
+doc-build = ["accelerate"]
+exporters = ["onnx", "onnxruntime", "protobuf (>=3.20.1)", "timm", "transformers (>=4.36,<4.53.0)"]
+exporters-gpu = ["onnx", "onnxruntime-gpu", "protobuf (>=3.20.1)", "timm", "transformers (>=4.36,<4.53.0)"]
+exporters-tf = ["datasets (<=2.16)", "h5py", "numpy (<1.24.0)", "onnx", "onnxruntime", "tensorflow (>=2.4,<=2.12.1)", "tf2onnx", "timm", "transformers (>=4.36,<4.38)"]
+furiosa = ["optimum-furiosa"]
+graphcore = ["optimum-graphcore"]
+habana = ["optimum-habana (>=1.17.0)"]
+intel = ["optimum-intel (>=1.23.0)"]
+ipex = ["optimum-intel[ipex] (>=1.23.0)"]
+neural-compressor = ["optimum-intel[neural-compressor] (>=1.23.0)"]
+neuronx = ["optimum-neuron[neuronx] (>=0.0.28)"]
+nncf = ["optimum-intel[nncf] (>=1.23.0)"]
+onnxruntime = ["datasets (>=1.2.1)", "onnx", "onnxruntime (>=1.11.0)", "protobuf (>=3.20.1)", "transformers (>=4.36,<4.53.0)"]
+onnxruntime-gpu = ["datasets (>=1.2.1)", "onnx", "onnxruntime-gpu (>=1.11.0)", "protobuf (>=3.20.1)", "transformers (>=4.36,<4.53.0)"]
+onnxruntime-training = ["accelerate", "datasets (>=1.2.1)", "evaluate", "onnxruntime-training (>=1.11.0)", "protobuf (>=3.20.1)", "torch-ort", "transformers (>=4.36,<4.53.0)"]
+openvino = ["optimum-intel[openvino] (>=1.23.0)"]
+quality = ["black (>=23.1,<24.0)", "ruff (==0.1.5)"]
+quanto = ["optimum-quanto (>=0.2.4)"]
+tests = ["Pillow", "accelerate", "einops", "hf-xet", "onnxslim (>=0.1.53)", "parameterized", "pytest (<=8.0.0)", "pytest-xdist", "requests", "rjieba", "sacremoses", "scikit-learn", "sentencepiece", "timm", "torchaudio", "torchvision"]
+
+[[package]]
 name = "orjson"
 version = "3.10.18"
 description = "Fast, correct Python JSON library supporting dataclasses, datetimes, and numpy"
@@ -3392,4 +3435,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "e72c028b06b05176a60780e2097eb9afc70416305711bd021f1ee86120eeb640"
+content-hash = "7d585a2b2c383240476c0bb0fdd26d7c2516a9c38e13582351caf928ae6374b9"

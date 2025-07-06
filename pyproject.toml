@@ -20,6 +20,7 @@ sentence-transformers = "^5.0.0"
 langchain-openai = "^0.3.27"
 langchain-huggingface = "^0.3.0"
 faiss-cpu = "^1.11.0"
+optimum = "^1.26.1"
 
 
 [build-system]
