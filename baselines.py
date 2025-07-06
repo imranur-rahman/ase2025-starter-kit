@@ -12,6 +12,7 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from rank_bm25 import BM25Okapi
+from mlx_lm import load, generate
 
 argparser = argparse.ArgumentParser()
 # Parameters for context collection strategy
@@ -388,7 +389,7 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
             vector_store.as_retriever(search_kwargs={"k": top_k}),
             bm25_retriever
         ],
-        weights=[0.4, 0.6]  # Adjusted weights for embeddings and BM25
+        weights=[0.8, 0.2]  # Adjusted weights for embeddings and BM25
     )
 
     # Get top-k results
@@ -410,6 +411,46 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
 
     print ("--------- Retrieving top-k code chunks -----------")
     return unique_results
+
+
+
+def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
+    """
+    Generate a natural language summary of the expected filler between prefix and suffix using mlx-lm.
+
+    :param prefix: Prefix of the code.
+    :param suffix: Suffix of the code.
+    :return: Natural language summary of the expected filler.
+    """
+    # Load the model and tokenizer using mlx-lm
+    model_name = "mlx-community/Qwen2.5-Coder-3B-Instruct-bf16"
+    model, tokenizer = load(model_name, tokenizer_config={"eos_token": "<|im_end|>"})
+
+    # Prepare the prompt for the model
+    prompt = f"Summarize the prefix code and suffix code in a structure. Don't repeat the suffix or prefix code in summary. There is a missing piece of code after prefix and before suffix. Reason what could be the missing piece that ties up prefix with suffix to achieve a functionality:\nPrefix:\n{prefix}\nSuffix:\n{suffix}"
+    messages = [
+        {"role": "system", "content": "You are an AI coding assistant. Your job is to summarize the code. You task also is to reason about missing piece of code to fulfill a functionality."},
+        {"role": "user", "content": prompt}
+    ]
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+
+    # Generate the summary
+    response = generate(
+        model,
+        tokenizer,
+        prompt=text,
+        verbose=True,
+        # top_p=0.8,
+        # temp=0.7,
+        # repetition_penalty=1.05,
+        max_tokens=500  # Adjust max_tokens for the summary length
+    )
+
+    return response
 
 
 # Path to the file with completion points
@@ -466,6 +507,12 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                     except Exception as e:
                         print(f"Skipping chunk due to error: {e}")
                         continue
+
+                # Generate natural language summary using the model
+                filler_summary = generate_filler_summary_with_model(datapoint['prefix'], datapoint['suffix'])
+
+                # Add summary to context
+                context_parts.insert(0, f"Natural Language Summary: {filler_summary}")
 
                 context = "\n".join(context_parts)
                 submission = {"context": context}
