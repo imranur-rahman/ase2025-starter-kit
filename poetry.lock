@@ -1024,6 +1024,18 @@ files = [
 ]
 
 [[package]]
+name = "kopyt"
+version = "0.0.2"
+description = "Kotlin parser in pure Python"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "kopyt-0.0.2-py3-none-any.whl", hash = "sha256:9c13538ef8edf5d8448bb8b1f63139142bef49c1d57bea45daeca5c0c6829a89"},
+    {file = "kopyt-0.0.2.tar.gz", hash = "sha256:89e053382180bf8c06b1d6c4e9c553acd3a748a7ca0f82c4076b86325f9ee060"},
+]
+
+[[package]]
 name = "langchain"
 version = "0.3.26"
 description = "Building applications with LLMs through composability"
@@ -3572,4 +3584,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "33288c77d93b37163b3efb86b76f31696eb4e9dfd8ef587f605006b222b2e922"
+content-hash = "306f34daec49cc18f3019328e6fa462887081938205e7e7e48f469d24d7f6dad"

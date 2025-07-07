@@ -1,6 +1,7 @@
 import os
 import jsonlines
 import random
+import ast
 import argparse
 import torch
 from tqdm import tqdm
@@ -13,6 +14,7 @@ from langchain_community.vectorstores import FAISS
 
 from rank_bm25 import BM25Okapi
 from mlx_lm import load, generate
+from kopyt import Parser, node
 
 argparser = argparse.ArgumentParser()
 # Parameters for context collection strategy
@@ -304,71 +306,52 @@ def trim_suffix(suffix: str):
         suffix = "\n".join(suffix_lines[:10])
     return suffix
 
-def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_lines: int = 8):
+def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_lines: int = 8, overlap_size: int = 2):
     """
-    Chunk the code into 10 lines each with 5 lines overlap, store embeddings in a vector database,
-    and compute BM25 scores for later retrieval.
+    Chunk code using AST structure, compute embeddings, and store them in a vector database.
 
     :param root_dir: Directory to search for code files.
     :param vector_db_path: Path to store the vector database.
-    :param min_lines: Minimum number of lines required in the file.
+    :param min_lines: Minimum number of lines required in a chunk.
+    :param overlap_size: Number of overlapping lines between chunks.
+    :return: Tuple containing vector store, BM25 retriever, and list of documents.
     """
+    documents = []
 
-    code_chunks = []
-    chunk_metadata = []
-
-    # Traverse files and chunk code
-    CHUNK_SIZE = 8  # Number of lines in each chunk
-    OVERLAP_SIZE = 1  # Number of overlapping lines
+    # Traverse files and chunk code using AST
     for dirpath, dirnames, filenames in os.walk(root_dir):
         for filename in filenames:
             if filename.endswith(extension):
                 file_path = os.path.join(dirpath, filename)
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
-                        if len(lines) >= min_lines:
-                            # Chunk the code into CHUNK_SIZE lines each with OVERLAP_SIZE lines overlap
-                            for i in range(0, len(lines), OVERLAP_SIZE):
-                                chunk = lines[i:i + CHUNK_SIZE]
-                                if len(chunk) < CHUNK_SIZE:
-                                    break
-                                code_chunks.append("\n".join(chunk))
-                                chunk_metadata.append({"file_name": filename, "file_path": file_path, "start_line": i + 1, "end_line": i + CHUNK_SIZE})
+                    # Use syntax-aware chunking
+                    if extension == ".py":
+                        file_documents = chunk_code_with_ast(file_path, min_lines=min_lines, overlap_size=overlap_size)
+                    else:
+                        file_documents = chunk_code_with_kopyt(file_path, min_lines=min_lines, overlap_size=overlap_size)
+                    documents.extend(file_documents)
                 except Exception as e:
-                    # Optional: handle unreadable files
-                    # print(f"Could not read {file_path}: {e}")
-                    pass
+                    print(f"Error processing file {file_path}: {e}")
+                    continue
 
     # Compute embeddings and store in vector database
     embeddings = HuggingFaceEmbeddings(
-        # model_name="bigcode/starcoder",
         model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'token': os.environ.get('HUGGINGFACE_TOKEN')},
-        # model_kwargs={'device': 'cpu'}
+        model_kwargs={'token': os.environ.get('HUGGINGFACE_TOKEN')}
     )
-    # Encode embeddings in parallel
-    documents = [Document(page_content=chunk, metadata=meta) for chunk, meta in zip(code_chunks, chunk_metadata)]
-    for doc in tqdm(documents, desc="Encoding code chunks"):
-        pass # just to show progress if debugging
     vector_store = FAISS.from_documents(documents, embeddings)
-    # Clear GPU memory
     torch.mps.empty_cache()
-    # Save the vector store to the specified path
     vector_store.save_local(vector_db_path)
 
     # Compute BM25 scores
-    # Create BM25 retriever from documents
     bm25_retriever = BM25Retriever.from_documents(documents)
-    
-    # Also create BM25Okapi for direct scoring if needed
     bm25_corpus = [doc.page_content.split() for doc in documents]
     bm25 = BM25Okapi(bm25_corpus)
 
-    return vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents
+    return vector_store, bm25, bm25_retriever, documents
 
 
-def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: BM25Okapi, bm25_retriever: BM25Retriever, code_chunks: list, chunk_metadata: list, documents: Document, top_k: int = 5):
+def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: BM25Okapi, bm25_retriever: BM25Retriever, documents: Document, top_k: int = 15):
     """
     Retrieve top-k code chunks using ensemble of embeddings and BM25 scores.
 
@@ -405,7 +388,6 @@ def retrieve_top_k_chunks(prefix: str, suffix: str, vector_store: FAISS, bm25: B
             seen_contents.add(result.page_content)
 
     print(f"Vector store size: {vector_store.index.ntotal}")
-    print(f"Code chunks size: {len(code_chunks)}")
     print(f"Top-k results from ensemble retriever: {len(top_k_results)}")
     print(f"Unique results after filtering: {len(unique_results)}")
 
@@ -422,6 +404,7 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
     :param suffix: Suffix of the code.
     :return: Natural language summary of the expected filler.
     """
+    torch.mps.empty_cache()
     # Load the model and tokenizer using mlx-lm
     model_name = "mlx-community/Qwen2.5-Coder-3B-Instruct-bf16"
     model, tokenizer = load(model_name, tokenizer_config={"eos_token": "<|im_end|>"})
@@ -449,8 +432,123 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
         # repetition_penalty=1.05,
         max_tokens=500  # Adjust max_tokens for the summary length
     )
-
+    torch.mps.empty_cache()
     return response
+
+
+def chunk_code_with_ast(file_path: str, min_lines: int = 8, overlap_size: int = 2):
+    """
+    Parse the code into AST, chunk it into functions, classes, and loops, and embed metadata into the code chunk.
+
+    :param file_path: Path to the code file.
+    :param min_lines: Minimum number of lines required in a chunk.
+    :param overlap_size: Number of overlapping lines between chunks.
+    :return: List of Document objects with metadata embedded in the code chunk.
+    """
+    documents = []
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read()
+            tree = ast.parse(code)
+
+            # Traverse AST to identify logical units
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.For, ast.While, ast.If)):
+                    start_line = node.lineno
+                    end_line = max([child.lineno for child in ast.walk(node) if hasattr(child, 'lineno')], default=start_line)
+                    chunk = "\n".join(code.splitlines()[start_line - 1:end_line])
+                    if len(chunk.splitlines()) >= min_lines:
+                        # Embed metadata directly into the code chunk
+                        metadata = f"# Metadata: file_name={file_path.split('/')[-1]}, function_name={getattr(node, 'name', 'N/A')}, start_line={start_line}, end_line={end_line}\n"
+                        chunk_with_metadata = metadata + chunk
+                        documents.append(Document(page_content=chunk_with_metadata))
+
+            # Add overlapping chunks for continuity
+            for i in range(len(documents) - 1):
+                overlap_chunk = "\n".join(documents[i].page_content.splitlines()[-overlap_size:] +
+                                          documents[i + 1].page_content.splitlines()[:overlap_size])
+                documents.append(Document(page_content=overlap_chunk))
+
+    except Exception as e:
+        print(f"Error processing file {file_path}: {e}")
+
+    return documents
+
+
+def walk_kopyt_tree(tree):
+    """
+    Recursively yield all nodes in the kopyt AST tree.
+    """
+    yield tree
+    if hasattr(tree, 'children') and tree.children:
+        for child in tree.children:
+            yield from walk_kopyt_tree(child)
+
+
+def chunk_code_with_kopyt(file_path: str, min_lines: int = 8, overlap_size: int = 2):
+    """
+    Parse Kotlin code using kopyt, chunk it into functions, classes, and loops, and embed metadata into the code chunk.
+
+    :param file_path: Path to the Kotlin code file.
+    :param min_lines: Minimum number of lines required in a chunk.
+    :param overlap_size: Number of overlapping lines between chunks.
+    :return: List of Document objects with metadata embedded in the code chunk.
+    """
+    documents = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            code = f.read()
+            lines = code.splitlines()
+            parser = Parser(code)
+            tree = parser.parse()
+
+            # Helper to get line numbers from node positions
+            def get_line(pos):
+                return code[:pos].count('\n') + 1
+
+            # Traverse the AST and collect nodes of interest
+            nodes = []
+            for n in walk_kopyt_tree(tree):
+                if hasattr(n, 'type') and n.type in ["functionDeclaration", "classDeclaration", "forExpression", "whileExpression"]:
+                    start_line = get_line(n.start)
+                    end_line = get_line(n.end)
+                    name = getattr(n, "name", n.type)
+                    # Try to get the signature if available
+                    signature = ""
+                    if hasattr(n, "children"):
+                        for child in n.children:
+                            if hasattr(child, 'type') and child.type == "functionValueParameters":
+                                signature = code[child.start:child.end]
+                    nodes.append((start_line, end_line, n.type, name, signature))
+
+            # Sort nodes by start_line
+            nodes.sort(key=lambda x: x[0])
+
+            # Chunk and embed metadata
+            for start_line, end_line, node_type, name, signature in nodes:
+                chunk_lines = lines[start_line-1:end_line]
+                if len(chunk_lines) >= min_lines:
+                    metadata = (
+                        f"// Metadata: file_name={file_path.split('/')[-1]}, "
+                        f"element_type={node_type}, element_name={name}, "
+                        f"signature={signature}, start_line={start_line}, end_line={end_line}\n"
+                    )
+                    chunk_with_metadata = metadata + "\n".join(chunk_lines)
+                    documents.append(Document(page_content=chunk_with_metadata))
+
+            # Add overlapping chunks for continuity
+            for i in range(len(documents) - 1):
+                overlap_chunk = "\n".join(
+                    documents[i].page_content.splitlines()[-overlap_size:] +
+                    documents[i + 1].page_content.splitlines()[:overlap_size]
+                )
+                documents.append(Document(page_content=overlap_chunk))
+
+    except Exception as e:
+        print(f"Error processing file {file_path}: {e}")
+
+    return documents
 
 
 # Path to the file with completion points
@@ -492,15 +590,16 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                 file_name = hybrid_search_file_local(root_directory, datapoint['prefix'], datapoint['suffix'])
             elif strategy == "code-chunk":
                 vector_db_path = os.path.join("data", "vector_db")
-                vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents = chunk_code_and_store_embeddings(root_directory, vector_db_path)
-                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, code_chunks, chunk_metadata, documents, top_k=30)
+                vector_store, bm25, bm25_retriever, documents = chunk_code_and_store_embeddings(root_directory, vector_db_path)
+                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, documents, top_k=30)
 
                 context_parts = []
                 for chunk in top_k_chunks:
                     try:
                         context_part = FILE_COMPOSE_FORMAT.format(
                             file_sep=FILE_SEP_SYMBOL,
-                            file_name=chunk.metadata['file_name'],
+                            # file_name=chunk.metadata['file_name'],
+                            file_name=chunk.metadata.get('file_name', 'unknown_file'),
                             file_content=chunk.page_content
                         )
                         context_parts.append(context_part)
