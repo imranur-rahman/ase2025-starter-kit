@@ -416,7 +416,8 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
         "3. If retrieval is needed, analyze the below contexts and use them for your reasoning.\n"
         "4. If retrieval is not needed, proceed with your own reasoning based on the prefix and suffix only.\n"
         "5. Summarize your reasoning and the expected code filler (the missing code between prefix and suffix).\n"
-        "6. Return your answer in the following JSON format:\n"
+        "6. Do not generate any code, just provide a natural language summary of the expected code.\n"
+        "7. Return your answer in the following JSON format:\n"
         "{\n"
         '  "retrieval_needed": <true/false>,\n'
         '  "reasoning": "<your step-by-step reasoning>",\n'
@@ -447,7 +448,7 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
         tokenizer,
         prompt=text,
         verbose=True,
-        max_tokens=500
+        max_tokens=1024
     )
     torch.mps.empty_cache()
     return response
