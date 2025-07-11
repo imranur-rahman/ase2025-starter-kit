@@ -591,20 +591,60 @@ with jsonlines.open(completion_points_file, 'r') as reader:
             elif strategy == "code-chunk":
                 vector_db_path = os.path.join("data", "vector_db")
                 vector_store, bm25, bm25_retriever, documents = chunk_code_and_store_embeddings(root_directory, vector_db_path)
-                top_k_chunks = retrieve_top_k_chunks(datapoint['prefix'], datapoint['suffix'], vector_store, bm25, bm25_retriever, documents, top_k=30)
+
+                # Build a mapping from chunk content to its index in the documents list
+                chunk_to_idx = {doc.page_content: idx for idx, doc in enumerate(documents)}
+
+                # Retrieve top-k for prefix and suffix separately
+                top_k = 15
+                prefix_top_chunks = retrieve_top_k_chunks(datapoint['prefix'], '', vector_store, bm25, bm25_retriever, documents, top_k=top_k)
+                suffix_top_chunks = retrieve_top_k_chunks('', datapoint['suffix'], vector_store, bm25, bm25_retriever, documents, top_k=top_k)
+
+                # Helper to get prev/next chunk content
+                def get_prev_next(idx):
+                    prev_chunk = documents[idx - 1].page_content if idx > 0 else None
+                    next_chunk = documents[idx + 1].page_content if idx < len(documents) - 1 else None
+                    return prev_chunk, next_chunk
 
                 context_parts = []
-                for chunk in top_k_chunks:
+                # For prefix: include next chunk
+                for chunk in prefix_top_chunks:
                     try:
-                        context_part = FILE_COMPOSE_FORMAT.format(
-                            file_sep=FILE_SEP_SYMBOL,
-                            # file_name=chunk.metadata['file_name'],
-                            file_name=chunk.metadata.get('file_name', 'unknown_file'),
-                            file_content=chunk.page_content
-                        )
-                        context_parts.append(context_part)
+                        idx = chunk_to_idx.get(chunk.page_content, None)
+                        if idx is not None:
+                            _, next_chunk = get_prev_next(idx)
+                            file_name = chunk.metadata.get('file_name', 'unknown_file')
+                            chunk_content = chunk.page_content
+                            if next_chunk:
+                                chunk_content = chunk_content + "\n# [NEXT CHUNK]\n" + next_chunk
+                            context_part = FILE_COMPOSE_FORMAT.format(
+                                file_sep=FILE_SEP_SYMBOL,
+                                file_name=file_name,
+                                file_content=chunk_content
+                            )
+                            context_parts.append(context_part)
                     except Exception as e:
-                        print(f"Skipping chunk due to error: {e}")
+                        print(f"Skipping prefix chunk due to error: {e}")
+                        continue
+
+                # For suffix: include prev chunk
+                for chunk in suffix_top_chunks:
+                    try:
+                        idx = chunk_to_idx.get(chunk.page_content, None)
+                        if idx is not None:
+                            prev_chunk, _ = get_prev_next(idx)
+                            file_name = chunk.metadata.get('file_name', 'unknown_file')
+                            chunk_content = chunk.page_content
+                            if prev_chunk:
+                                chunk_content = prev_chunk + "\n# [CURR CHUNK]\n" + chunk_content
+                            context_part = FILE_COMPOSE_FORMAT.format(
+                                file_sep=FILE_SEP_SYMBOL,
+                                file_name=file_name,
+                                file_content=chunk_content
+                            )
+                            context_parts.append(context_part)
+                    except Exception as e:
+                        print(f"Skipping suffix chunk due to error: {e}")
                         continue
 
                 # Generate natural language summary using the model
@@ -615,7 +655,7 @@ with jsonlines.open(completion_points_file, 'r') as reader:
 
                 context = "\n".join(context_parts)
                 submission = {"context": context}
-                print(f"Top-k chunks retrieved and merged: {len(top_k_chunks)}")
+                print(f"Top-k prefix chunks: {len(prefix_top_chunks)}, suffix chunks: {len(suffix_top_chunks)}")
                 writer.write(submission)
                 continue
             else:
