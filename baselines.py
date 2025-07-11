@@ -421,6 +421,7 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
         "{\n"
         '  "retrieval_needed": <true/false>,\n'
         '  "reasoning": "<your step-by-step reasoning>",\n'
+        '  "confidence": "<your confidence level in the retrieval decision>",\n'
         '  "prefix_summary": "<natural language summary of the prefix>",\n'
         '  "suffix_summary": "<natural language summary of the suffix>",\n'
         '  "expected_filler_code_summary": "<natural language summary of the missing code between prefix and suffix>"\n'
