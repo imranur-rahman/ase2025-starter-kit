@@ -651,13 +651,8 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                 filler_summary = generate_filler_summary_with_model(datapoint['prefix'], datapoint['suffix'])
 
                 # Add summary to context
-                instruction = (
-                    "Instruction: First, think step-by-step whether retrieval of similar code is needed for this completion. "
-                    "If yes, look at the below contexts and use them for reasoning. "
-                    "If not, proceed with your own reasoning."
-                )
-                context_parts.insert(0, instruction)
-                context_parts.insert(1, f"Natural Language Summary: {filler_summary}")
+                context_parts.insert(0, f"Natural Language Summary: {filler_summary}")
+
                 context = "\n".join(context_parts)
                 submission = {"context": context}
                 print(f"Top-k prefix chunks: {len(prefix_top_chunks)}, suffix chunks: {len(suffix_top_chunks)}")
