@@ -402,40 +402,17 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
 
     :param prefix: Prefix of the code.
     :param suffix: Suffix of the code.
-    :return: JSON-formatted reasoning and summary of the expected filler.
+    :return: Natural language summary of the expected filler.
     """
     torch.mps.empty_cache()
+    # Load the model and tokenizer using mlx-lm
     model_name = "mlx-community/Qwen2.5-Coder-3B-Instruct-bf16"
     model, tokenizer = load(model_name, tokenizer_config={"eos_token": "<|im_end|>"})
 
-    # Improved instruction and JSON response format for the model
-    instruction = (
-        "Instruction:\n"
-        "1. Carefully read the provided code context, prefix, and suffix.\n"
-        "2. Think step-by-step whether retrieval of similar code is needed for this completion task.\n"
-        "3. If retrieval is needed, analyze the below contexts and use them for your reasoning.\n"
-        "4. If retrieval is not needed, proceed with your own reasoning based on the prefix and suffix only.\n"
-        "5. Summarize your reasoning and the expected code filler (the missing code between prefix and suffix).\n"
-        "6. Do not generate any code, just provide a natural language summary of the expected code.\n"
-        "7. Return your answer in the following JSON format:\n"
-        "{\n"
-        '  "retrieval_needed": <true/false>,\n'
-        '  "reasoning": "<your step-by-step reasoning>",\n'
-        '  "confidence": "<your confidence level in the retrieval decision>",\n'
-        '  "prefix_summary": "<natural language summary of the prefix>",\n'
-        '  "suffix_summary": "<natural language summary of the suffix>",\n'
-        '  "expected_filler_code_summary": "<natural language summary of the missing code between prefix and suffix>"\n'
-        "}\n"
-    )
-
-    prompt = (
-        f"{instruction}\n"
-        f"Prefix:\n{prefix}\n"
-        f"Suffix:\n{suffix}\n"
-    )
-
+    # Prepare the prompt for the model
+    prompt = f"Summarize the prefix code and suffix code in a structure. Don't repeat the suffix or prefix code in summary. There is a missing piece of code after prefix and before suffix. Reason what could be the missing piece that ties up prefix with suffix to achieve a functionality:\nPrefix:\n{prefix}\nSuffix:\n{suffix}"
     messages = [
-        {"role": "system", "content": "You are an AI coding assistant. Follow the instructions and return your answer in the specified JSON format."},
+        {"role": "system", "content": "You are an AI coding assistant. Your job is to summarize the code. You task also is to reason about missing piece of code to fulfill a functionality."},
         {"role": "user", "content": prompt}
     ]
     text = tokenizer.apply_chat_template(
@@ -444,12 +421,16 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
         add_generation_prompt=True
     )
 
+    # Generate the summary
     response = generate(
         model,
         tokenizer,
         prompt=text,
         verbose=True,
-        max_tokens=1024
+        # top_p=0.8,
+        # temp=0.7,
+        # repetition_penalty=1.05,
+        max_tokens=500  # Adjust max_tokens for the summary length
     )
     torch.mps.empty_cache()
     return response
