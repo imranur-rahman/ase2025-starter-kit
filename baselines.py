@@ -325,10 +325,25 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
                 file_path = os.path.join(dirpath, filename)
                 try:
                     # Use syntax-aware chunking
-                    if extension == ".py":
-                        file_documents = chunk_code_with_ast(file_path, min_lines=min_lines, overlap_size=overlap_size)
-                    else:
-                        file_documents = chunk_code_with_kopyt(file_path, min_lines=min_lines, overlap_size=overlap_size)
+                    # Comment out AST-based chunking
+                    # if extension == ".py":
+                    #     file_documents = chunk_code_with_ast(file_path, min_lines=min_lines, overlap_size=overlap_size)
+                    # else:
+                    #     file_documents = chunk_code_with_kopyt(file_path, min_lines=min_lines, overlap_size=overlap_size)
+                    
+                    # Line-based chunking with overlap
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    
+                    file_documents = []
+                    for i in range(0, len(lines), min_lines - overlap_size):
+                        chunk_lines = lines[i:i + min_lines]
+                        if len(chunk_lines) >= min_lines:
+                            chunk_content = ''.join(chunk_lines)
+                            # Add metadata
+                            metadata = f"# Metadata: file_name={os.path.basename(file_path)}, start_line={i+1}, end_line={i+len(chunk_lines)}\n"
+                            chunk_with_metadata = metadata + chunk_content
+                            file_documents.append(Document(page_content=chunk_with_metadata))
                     documents.extend(file_documents)
                 except Exception as e:
                     print(f"Error processing file {file_path}: {e}")
