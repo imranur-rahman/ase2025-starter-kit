@@ -412,7 +412,7 @@ def generate_filler_summary_with_model(prefix: str, suffix: str) -> str:
     # Prepare the prompt for the model
     prompt = f"Summarize the prefix code and suffix code in a structure. Don't repeat the suffix or prefix code in summary. There is a missing piece of code after prefix and before suffix. Reason what could be the missing piece that ties up prefix with suffix to achieve a functionality:\nPrefix:\n{prefix}\nSuffix:\n{suffix}"
     messages = [
-        {"role": "system", "content": "You are an AI coding assistant. Your job is to summarize the code. You task also is to reason about missing piece of code to fulfill a functionality."},
+        {"role": "system", "content": "You are an AI coding assistant. Your job is to summarize the code. You task also is to reason about missing piece of code to fulfill a functionality. Do not write any code."},
         {"role": "user", "content": prompt}
     ]
     text = tokenizer.apply_chat_template(
@@ -458,7 +458,9 @@ def chunk_code_with_ast(file_path: str, min_lines: int = 8, overlap_size: int = 
                     start_line = node.lineno
                     end_line = max([child.lineno for child in ast.walk(node) if hasattr(child, 'lineno')], default=start_line)
                     chunk = "\n".join(code.splitlines()[start_line - 1:end_line])
+                    # print (f"Processing chunk from {file_path} ({start_line}-{end_line}): {node.__class__.__name__}")
                     if len(chunk.splitlines()) >= min_lines:
+                        # print (f"This chunk has enough lines: chunk from {file_path} ({start_line}-{end_line}) has {len(chunk.splitlines())} lines")
                         # Embed metadata directly into the code chunk
                         metadata = f"# Metadata: file_name={file_path.split('/')[-1]}, function_name={getattr(node, 'name', 'N/A')}, start_line={start_line}, end_line={end_line}\n"
                         chunk_with_metadata = metadata + chunk
@@ -646,6 +648,41 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                     except Exception as e:
                         print(f"Skipping suffix chunk due to error: {e}")
                         continue
+                
+                # Add the completion file and recently modified files as context
+                extra_context_parts = []
+                # Add the completion file
+                completion_file_path = os.path.join(root_directory, datapoint.get("path", ""))
+                if os.path.isfile(completion_file_path):
+                    try:
+                        with open(completion_file_path, 'r', encoding='utf-8') as f:
+                            completion_content = f.read()
+                        extra_context_parts.append(FILE_COMPOSE_FORMAT.format(
+                            file_sep=FILE_SEP_SYMBOL,
+                            file_name=datapoint.get("path", "unknown_file"),
+                            file_content=completion_content
+                        ))
+                    except Exception as e:
+                        print(f"Could not read completion file {completion_file_path}: {e}")
+                # Add recently modified files
+                for mod_file in datapoint.get("modified", []):
+                    mod_file_path = os.path.join(root_directory, mod_file)
+                    if os.path.isfile(mod_file_path):
+                        try:
+                            with open(mod_file_path, 'r', encoding='utf-8') as f:
+                                mod_content = f.read()
+                            extra_context_parts.append(FILE_COMPOSE_FORMAT.format(
+                                file_sep=FILE_SEP_SYMBOL,
+                                file_name=mod_file,
+                                file_content=mod_content
+                            ))
+                        except Exception as e:
+                            print(f"Could not read modified file {mod_file_path}: {e}")
+                
+                # Insert these at the start of context_parts if context_parts exists
+                if 'context_parts' in locals():
+                    context_parts = extra_context_parts + context_parts
+                    print (f"Added {len(extra_context_parts)} extra context parts to the start of context_parts")
 
                 # Generate natural language summary using the model
                 filler_summary = generate_filler_summary_with_model(datapoint['prefix'], datapoint['suffix'])
@@ -661,6 +698,7 @@ with jsonlines.open(completion_points_file, 'r') as reader:
             else:
                 raise ValueError(f"Unknown strategy: {strategy}")
 
+            
             # Compose the context from the selected file
             file_content = open(file_name, 'r', encoding='utf-8').read()
             clean_file_name = file_name[len(root_directory) + 1:]
