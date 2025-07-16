@@ -533,12 +533,6 @@ with jsonlines.open(completion_points_file, 'r') as reader:
                     context_parts = extra_context_parts + context_parts
                     print (f"Added {len(extra_context_parts)} extra context parts to the start of context_parts")
 
-                # # Generate natural language summary using the model
-                # filler_summary = generate_filler_summary_with_model(datapoint['prefix'], datapoint['suffix'])
-
-                # # Add summary to context
-                # context_parts.insert(0, f"Natural Language Summary: {filler_summary}")
-
                 context = "\n".join(context_parts)
                 submission = {"context": context}
                 print(f"Top-k prefix chunks: {len(prefix_top_chunks)}, suffix chunks: {len(suffix_top_chunks)}")
