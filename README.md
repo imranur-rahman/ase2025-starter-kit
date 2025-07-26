@@ -89,10 +89,10 @@ The current working directory should have a `/data` folder where the private ins
 With the `-v` flag,`$(pwd)/data:/app/data` and `$(pwd)/predictions:/app/predictions` mount the external directory (before `:`) to the container (after `:`).
 
 ```bash
-docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-starter-kit poetry run python baselines.py --stage private --strategy code-chunk --lang python
+docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-imranur poetry run python baselines.py --stage private --strategy code-chunk --lang python
 ```
 
 ```bash
-docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-starter-kit poetry run python baselines.py --stage private --strategy code-chunk --lang kotlin
+docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-imranur poetry run python baselines.py --stage private --strategy code-chunk --lang kotlin
 ```
 
