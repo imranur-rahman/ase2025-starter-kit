@@ -84,7 +84,7 @@ Please read the [Evaluation](https://eval.ai/web/challenges/challenge-page/2516/
 `docker build -t ase2025-imranur .`
 
 ## Run with code-chunk strategy
-The current working directory should have a `/data` folder where the private instance for python and kotlin is extracted using `./prepare_data.sh private python` and `./prepare_data.sh private kotlin`.
+The current working directory should have a `/predictions` folder for storing the results and a `/data` folder where the private instance for python and kotlin is extracted using `./prepare_data.sh private python` and `./prepare_data.sh private kotlin`.
 
 With the `-v` flag,`$(pwd)/data:/app/data` and `$(pwd)/predictions:/app/predictions` mount the external directory (before `:`) to the container (after `:`).
 
