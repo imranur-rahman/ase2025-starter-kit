@@ -21,8 +21,6 @@ langchain-openai = "^0.3.27"
 langchain-huggingface = "^0.3.0"
 faiss-cpu = "^1.11.0"
 optimum = "^1.26.1"
-mlx-lm = "^0.25.3"
-kopyt = "^0.0.2"
 
 
 [build-system]

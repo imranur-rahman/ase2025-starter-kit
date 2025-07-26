@@ -13,8 +13,6 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 from rank_bm25 import BM25Okapi
-from mlx_lm import load, generate
-from kopyt import Parser, node
 
 argparser = argparse.ArgumentParser()
 # Parameters for context collection strategy
@@ -348,7 +346,11 @@ def chunk_code_and_store_embeddings(root_dir: str, vector_db_path: str, min_line
         model_kwargs={'token': os.environ.get('HUGGINGFACE_TOKEN')}
     )
     vector_store = FAISS.from_documents(documents, embeddings)
-    torch.mps.empty_cache()
+    # Clear GPU cache for memory efficiency
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif torch.backends.mps.is_available():
+        torch.mps.empty_cache()
     vector_store.save_local(vector_db_path)
 
     # Compute BM25 scores

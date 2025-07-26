@@ -78,3 +78,21 @@ Go to the [competition page](https://eval.ai/web/challenges/challenge-page/2516)
 The contexts are used to generate completions with three different models based on their similarity to the reference text with the ChrF score metric. 
 The final score is the average across the scores of the three models.
 Please read the [Evaluation](https://eval.ai/web/challenges/challenge-page/2516/evaluation) section of the competition page for details.
+
+# Private Phase Evaluation
+## Build the container
+`docker build -t ase2025-imranur .`
+
+## Run with code-chunk strategy
+The current working directory should have a `/data` folder where the private instance for python and kotlin is extracted using `./prepare_data.sh private python` and `./prepare_data.sh private kotlin`.
+
+With the `-v` flag,`$(pwd)/data:/app/data` and `$(pwd)/predictions:/app/predictions` mount the external directory (before `:`) to the container (after `:`).
+
+```bash
+docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-starter-kit poetry run python baselines.py --stage private --strategy code-chunk --lang python
+```
+
+```bash
+docker run -v $(pwd)/data:/app/data -v $(pwd)/predictions:/app/predictions ase2025-starter-kit poetry run python baselines.py --stage private --strategy code-chunk --lang kotlin
+```
+
